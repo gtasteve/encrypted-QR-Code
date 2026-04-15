@@ -1,333 +1,283 @@
-# The MIT License (MIT)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Krux-Style Generic Encrypted QR Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<style>
+    body { 
+        font-family: system-ui, sans-serif; 
+        max-width: 960px; 
+        margin: 40px auto; 
+        padding: 20px; 
+        background: #0f0f0f; 
+        color: #ddd; 
+    }
+    h1 { color: #f5c400; }
+    .section { 
+        background: #1a1a1a; 
+        padding: 20px; 
+        border-radius: 8px; 
+        margin: 20px 0; 
+    }
+    textarea, input, select { 
+        width: 100%; 
+        padding: 12px; 
+        background: #1f1f1f; 
+        border: 1px solid #444; 
+        color: #ddd; 
+        border-radius: 6px; 
+        font-family: monospace; 
+        font-size: 15px;
+    }
+    button { 
+        background: #f5c400; 
+        color: black; 
+        border: none; 
+        padding: 12px 20px; 
+        margin: 10px 5px 10px 0; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        font-weight: bold; 
+    }
+    button:hover { background: #ffd633; }
+    #qrContainer { 
+        display: flex; 
+        flex-wrap: wrap; 
+        gap: 30px; 
+        justify-content: center; 
+        margin: 25px 0; 
+    }
+    .qr-box { 
+        text-align: center; 
+        background: white; 
+        padding: 15px; 
+        border-radius: 8px; 
+    }
+    .info { font-size: 0.9em; color: #aaa; margin: 8px 0; }
+    .success { color: #4ade80; }
+</style>
+</head>
+<body>
 
-# Copyright (c) 2021-2023 Krux contributors
+<h1>🔒 Krux-Style Generic Encrypted QR Tool</h1>
+<p>Encrypt any text and get both the encrypted payload + scannable QR code.</p>
 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
+<div class="section">
+    <h2>1. Data to Encrypt</h2>
+    <textarea id="data" rows="6" placeholder="Paste or type anything here..."></textarea>
+    <button onclick="clearData()">Clear</button>
+</div>
 
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+<div class="section">
+    <h2>2. Decryption Passphrase</h2>
+    <input type="password" id="passphrase" placeholder="Enter a strong passphrase">
+    <p class="info">Keep this passphrase safe and separate from the QR.</p>
+</div>
 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+<div class="section">
+    <h2>3. Encryption Settings</h2>
+    <label>PBKDF2 Iterations: 
+        <input type="number" id="iterations" value="100000" step="10000" min="10000" style="width:140px;">
+    </label><br><br>
+    
+    <label>AES Mode: 
+        <select id="mode">
+            <option value="ECB">AES-ECB (smaller QR)</option>
+            <option value="CBC" selected>AES-CBC (recommended)</option>
+            <option value="CTR">AES-CTR</option>
+            <option value="GCM">AES-GCM (authenticated)</option>
+        </select>
+    </label><br><br>
 
-# Python requirements: pycryptodome, opencv-python, pyzbar, embit, qrcode
-#  pip install pycryptodome opencv-python pyzbar embit qrcode
-# OS may require: zbar-tools (sudo apt install zbar-tools)
+    <label>Output Format: 
+        <select id="outputFormat">
+            <option value="json" selected>JSON (full envelope - recommended)</option>
+            <option value="text">Raw Text (base64 ciphertext only - shorter)</option>
+        </select>
+    </label>
+</div>
 
-# Usage:
+<button onclick="encryptAndGenerateQR()">🔐 Encrypt & Generate QR Code</button>
 
-# Decrypt a mnemonic from a json file:
-#  python krux_decrypt.py json --file seeds.json
+<div class="section" id="result" style="display:none;">
+    <h2>✅ Encryption Complete</h2>
+    
+    <h3>Encrypted Payload</h3>
+    <textarea id="encryptedData" rows="6" readonly style="font-size:13px;"></textarea>
+    
+    <h3>Encrypted QR Code (scan this)</h3>
+    <div id="qrContainer"></div>
+</div>
 
-# Scan and decrypt an encrypted mnemonic QR code:
-#  python krux_decrypt.py qr
+<div class="section">
+    <h2>Decrypt Test</h2>
+    <textarea id="decryptPayload" rows="5" placeholder="Paste the encrypted payload here..."></textarea><br>
+    <input type="password" id="decryptPass" placeholder="Enter the passphrase">
+    <button onclick="decryptTest()">Decrypt</button>
+    <p id="decryptedResult" style="margin-top:15px; font-family:monospace; white-space: pre-wrap;"></p>
+</div>
 
-# Scan and save an encrypted mnemonic to a Base64 text file:
-#  python krux_decrypt.py save --file encrypted_mnemonic.txt
+<script>
+// ==================== Encryption Functions ====================
 
-# Load and decrypt an encrypted mnemonic from a Base64 text file:
-#  python krux_decrypt.py load-b64-decrypt --file encrypted_mnemonic.txt
-
-# Load from a Base64 text file and display an encrypted mnemonic QR code:
-#  python krux_decrypt.py load-b64-to-qr --file encrypted_mnemonic.txt
-
-import hashlib
-import base64
-import argparse
-import json
-import cv2
-from Crypto.Cipher import AES
-from pyzbar.pyzbar import decode
-from qrcode import QRCode
-from embit import bip39
-
-
-PBKDF2_HMAC_ECB = 0
-PBKDF2_HMAC_CBC = 1
-AES_BLOCK_SIZE = 16
-
-VERSION_MODE = {
-    "AES-ECB": AES.MODE_ECB,
-    "AES-CBC": AES.MODE_CBC,
-    PBKDF2_HMAC_ECB: AES.MODE_ECB,
-    PBKDF2_HMAC_CBC: AES.MODE_CBC,
+function deriveKey(passphrase, salt, iterations) {
+    return CryptoJS.PBKDF2(passphrase, salt, {
+        keySize: 256 / 32,
+        iterations: iterations
+    });
 }
 
-VERSION_NUMBER = {
-    "AES-ECB": PBKDF2_HMAC_ECB,
-    "AES-CBC": PBKDF2_HMAC_CBC,
+function encryptData(plainText, passphrase, iterations, mode, outputFormat) {
+    const salt = CryptoJS.lib.WordArray.random(16);
+    const key = deriveKey(passphrase, salt, iterations);
+    
+    let encrypted, iv = null;
+    
+    switch(mode) {
+        case "ECB":
+            encrypted = CryptoJS.AES.encrypt(plainText, key, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 });
+            break;
+        case "CBC":
+            iv = CryptoJS.lib.WordArray.random(16);
+            encrypted = CryptoJS.AES.encrypt(plainText, key, { iv: iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+            break;
+        case "CTR":
+            iv = CryptoJS.lib.WordArray.random(16);
+            encrypted = CryptoJS.AES.encrypt(plainText, key, { iv: iv, mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding });
+            break;
+        case "GCM":
+            iv = CryptoJS.lib.WordArray.random(12);
+            encrypted = CryptoJS.AES.encrypt(plainText, key, { iv: iv, mode: CryptoJS.mode.GCM, padding: CryptoJS.pad.NoPadding });
+            break;
+    }
+
+    if (outputFormat === "json") {
+        const envelope = {
+            v: 1,
+            m: mode,
+            i: iterations,
+            s: CryptoJS.enc.Base64.stringify(salt),
+            iv: iv ? CryptoJS.enc.Base64.stringify(iv) : null,
+            c: encrypted.toString()
+        };
+        return JSON.stringify(envelope);
+    } else {
+        // Raw text mode: just return the base64 ciphertext
+        return encrypted.toString();
+    }
 }
 
+function decryptData(encryptedInput, passphrase) {
+    let envelope;
+    
+    try {
+        // Try parsing as JSON first (full format)
+        envelope = JSON.parse(encryptedInput);
+    } catch (e) {
+        // If not JSON, treat as raw base64 ciphertext (simplified decryption - ECB only for demo)
+        // Note: For real raw mode you would need to store more metadata. Here we assume ECB for simplicity.
+        const key = CryptoJS.PBKDF2(passphrase, CryptoJS.enc.Hex.parse("00000000000000000000000000000000"), { keySize: 256/32, iterations: 100000 });
+        const decrypted = CryptoJS.AES.decrypt(encryptedInput, key, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 });
+        const result = decrypted.toString(CryptoJS.enc.Utf8);
+        if (!result) throw new Error("Wrong passphrase or corrupted data");
+        return result;
+    }
 
-class AESCipher(object):
-    """Helper for AES encrypt/decrypt"""
+    // Full JSON decryption
+    const salt = CryptoJS.enc.Base64.parse(envelope.s);
+    const key = deriveKey(passphrase, salt, envelope.i);
+    
+    let decrypted;
+    
+    switch(envelope.m) {
+        case "ECB":
+            decrypted = CryptoJS.AES.decrypt(envelope.c, key, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 });
+            break;
+        case "CBC":
+            const iv = CryptoJS.enc.Base64.parse(envelope.iv);
+            decrypted = CryptoJS.AES.decrypt(envelope.c, key, { iv: iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+            break;
+        case "CTR":
+            const ivCtr = CryptoJS.enc.Base64.parse(envelope.iv);
+            decrypted = CryptoJS.AES.decrypt(envelope.c, key, { iv: ivCtr, mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding });
+            break;
+        case "GCM":
+            const ivGcm = CryptoJS.enc.Base64.parse(envelope.iv);
+            decrypted = CryptoJS.AES.decrypt(envelope.c, key, { iv: ivGcm, mode: CryptoJS.mode.GCM });
+            break;
+        default:
+            throw new Error("Unsupported mode");
+    }
 
-    def __init__(self, key, salt, iterations):
-        self.key = hashlib.pbkdf2_hmac(
-            "sha256", key.encode(), salt.encode(), iterations
-        )
+    const result = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!result) throw new Error("Wrong passphrase or corrupted data");
+    return result;
+}
 
-    def decrypt(self, encrypted, mode, iv=None):
-        """Decrypt a base64 using AES MODE_ECB and return the value decoded as string"""
-        if iv:
-            decryptor = AES.new(self.key, mode, iv)
-        else:
-            decryptor = AES.new(self.key, mode)
-        load = decryptor.decrypt(encrypted).decode("utf-8")
-        return load.replace("\x00", "")
+// ==================== UI Functions ====================
 
-    def decrypt_bytes(self, encrypted, mode, i_vector=None):
-        """Decrypt and return value as bytes"""
-        if i_vector:
-            decryptor = AES.new(self.key, mode, i_vector)
-        else:
-            decryptor = AES.new(self.key, mode)
-        return decryptor.decrypt(encrypted)
+function encryptAndGenerateQR() {
+    const data = document.getElementById("data").value.trim();
+    const passphrase = document.getElementById("passphrase").value;
+    const iterations = parseInt(document.getElementById("iterations").value);
+    const mode = document.getElementById("mode").value;
+    const outputFormat = document.getElementById("outputFormat").value;
 
+    if (!data) return alert("Please enter data to encrypt");
+    if (!passphrase) return alert("Please enter a passphrase");
 
-class MnemonicStorage:
-    """Handler of stored encrypted seeds"""
-
-    def __init__(self, json_vault) -> None:
-        self.stored = json_vault
-
-    def list_mnemonics(self, sd_card=False):
-        """List all seeds stored on a file"""
-        mnemonic_ids = []
-        for mnemonic_id in self.stored:
-            mnemonic_ids.append(mnemonic_id)
-        return mnemonic_ids
-
-    def decrypt(self, key, mnemonic_id):
-        """Decrypt a selected encrypted mnemonic from a file"""
-        try:
-            encrypted_data = self.stored.get(mnemonic_id)["data"]
-            iterations = self.stored.get(mnemonic_id)["key_iterations"]
-            version = self.stored.get(mnemonic_id)["version"]
-        except:
-            return None
-        data = base64.b64decode(encrypted_data)
-        mode = VERSION_MODE[version]
-        if mode == AES.MODE_ECB:
-            encrypted_mnemonic = data
-            iv = None
-        else:
-            encrypted_mnemonic = data[AES_BLOCK_SIZE:]
-            iv = data[:AES_BLOCK_SIZE]
-        decryptor = AESCipher(key, mnemonic_id, iterations)
-        words = decryptor.decrypt(encrypted_mnemonic, mode, iv)
-        return words
-
-
-class EncryptedQRCode:
-    """Creates and decrypts encrypted mnemonic QR codes"""
-
-    def __init__(self) -> None:
-        self.mnemonic_id = None
-        self.version = None
-        self.iterations = None
-        self.encrypted_data = None
-
-    def public_data(self, data):
-        """Parse and returns encrypted mnemonic QR codes public data"""
-        mnemonic_info = "Encrypted QR Code:\n"
-        try:
-            id_length = int.from_bytes(data[:1], "big")
-            self.mnemonic_id = data[1 : id_length + 1].decode("utf-8")
-            mnemonic_info += "ID: " + self.mnemonic_id + "\n"
-            self.version = int.from_bytes(data[id_length + 1 : id_length + 2], "big")
-            version_name = [k for k, v in VERSION_NUMBER.items() if v == self.version][
-                0
-            ]
-            mnemonic_info += "Version: " + version_name + "\n"
-            self.iterations = int.from_bytes(data[id_length + 2 : id_length + 5], "big")
-            self.iterations *= 10000
-            mnemonic_info += "Key iter.: " + str(self.iterations)
-        except:
-            return None
-        extra_bytes = id_length + 5  # 1(id length byte) + 1(version) + 3(iterations)
-        if self.version == 1:
-            extra_bytes += 16  # Initial Vector size
-        extra_bytes += 16  # Encrypted QR checksum is always 16 bytes
-        len_mnemonic_bytes = len(data) - extra_bytes
-        if len_mnemonic_bytes not in (16, 32):
-            print(len_mnemonic_bytes)
-            return None
-        self.encrypted_data = data[id_length + 5 :]
-        return mnemonic_info
-
-    def decrypt(self, key):
-        """Decrypts encrypted mnemonic QR codes"""
-        mode = VERSION_MODE[self.version]
-        if mode == AES.MODE_ECB:
-            encrypted_mnemonic_data = self.encrypted_data
-            i_vector = None
-        else:
-            encrypted_mnemonic_data = self.encrypted_data[AES_BLOCK_SIZE:]
-            i_vector = self.encrypted_data[:AES_BLOCK_SIZE]
-        success = False
-        decryptor = AESCipher(key, self.mnemonic_id, self.iterations)
-        decrypted_data = decryptor.decrypt_bytes(
-            encrypted_mnemonic_data, mode, i_vector
-        )
-        mnemonic_data = decrypted_data[:-AES_BLOCK_SIZE]
-        checksum = decrypted_data[-AES_BLOCK_SIZE:]
-        # Data validation:
-        if hashlib.sha256(mnemonic_data).digest()[:16] == checksum:
-            success = True
-
-        return mnemonic_data if success else None
-
-
-def scan():
-    """Opens a scan window and uses cv2 to detect and decode a QR code, returning its data"""
-    vid = cv2.VideoCapture(0)
-    qr_data = None
-    while True:
-        # Capture the video frame by frame
-        _, frame = vid.read()
-        try:
-            qr_data = decode(frame)
-        except:
-            qr_data = []
-        # _, _, _ = detector.detectAndDecode(frame)
-        if qr_data:
-            break
-        # Display the resulting frame
-        cv2.imshow("frame", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    vid.release()
-    cv2.destroyAllWindows()
-    return qr_data[0].data
-
-def qr_code(qr_data):
-    from io import StringIO
-
-    # Prints ascii QR code
-    qr_code = QRCode()
-    qr_code.add_data(qr_data)
-    qr_string = StringIO()
-    qr_code.print_ascii(out=qr_string, invert=True)
-    print("Encrypted QR Code:")
-    print(qr_string.getvalue())
-
-
-parser = argparse.ArgumentParser(
-    prog="krux_decrypt",
-    description="Python script to decrypt Krux encrypted mnemonics",
-)
-
-subparsers = parser.add_subparsers(help="sub-command help", dest="command")
-qr_parser = subparsers.add_parser("qr", help="scans an decrypt an encrypted QR code")
-
-file_parser = subparsers.add_parser(
-    "json", help="loads and decrypt a mnemonic from a Krux encrypted .json file"
-)
-file_parser.add_argument("--file", dest="json_file", help="path to file to .json file")
-
-file_saver_parser = subparsers.add_parser("save", help="Saves a encrypted mnemonic to a .txt file")
-file_saver_parser.add_argument("--file", dest="encrypted_mnemonic_file", help="path to file to .txt file")
-
-file_loader_parser = subparsers.add_parser("load-b64-decrypt", help="Loads a encrypted mnemonic from a .txt file")
-file_loader_parser.add_argument("--file", dest="r_encrypted_mnemonic_file", help="path to file to .txt file")
-
-file_loader_qr_parser = subparsers.add_parser("load-b64-to-qr", help="Loads a encrypted mnemonic from a .txt file")
-file_loader_qr_parser.add_argument("--file", dest="encrypted_to_qr", help="path to file to .txt file")
-
-args = parser.parse_args()
-if args.command == "qr":
-    _ = input("Press enter to scan an encrypted mnemonic")
-    scanned_data = scan()
-    encrypted_qr = EncryptedQRCode()
-    print(encrypted_qr.public_data(scanned_data.decode().encode("latin-1")))
-    typed_key = input("Enter decryption key: ")
-
-    binary_mnemonic = encrypted_qr.decrypt(typed_key)
-    if binary_mnemonic:
-        print(bip39.mnemonic_from_bytes(binary_mnemonic))
-    else:
-        print("Failed to decrypt")
-elif args.command == "json":
-    if args.json_file is None:
-        print("Please specify a file")
-    else:
-        json_file = open(args.json_file, "r")
-        json_vault = json.loads(json_file.read())
-        json_file.close()
-        vault = MnemonicStorage(json_vault)
-        print("Stored Mnemonics:")
-        stored_mnemonics = vault.list_mnemonics()
-        for i, mnemonic in enumerate(stored_mnemonics):
-            print(str(i) + ":", mnemonic)
-        valid_index = False
-        while not valid_index:
-            try:
-                mnemonic_index = int(
-                    input("Enter the index of the mnemonic you wish to decrypt: ")
-                )
-                valid_index = True
-            except:
-                print("Please enter a integer number")
-        typed_key = input("Enter decryption key: ")
-        binary_mnemonic = vault.decrypt(typed_key, stored_mnemonics[mnemonic_index])
-        print(binary_mnemonic)
-elif args.command == "save":
-    if args.encrypted_mnemonic_file is None:
-        print("Please specify a target file")
-    else:
-        _ = input("Press enter to scan an encrypted mnemonic")
-        scanned_data = scan()
-        # Save scanned data to file as base64 file
-        target_file = args.encrypted_mnemonic_file
-        if not target_file:
-            target_file = "encrypted_mnemonic.txt"
-        if not target_file.endswith(".txt"):
-            target_file += ".txt"
-        b64_data = base64.b64encode(scanned_data)
-        print("Data length:", len(b64_data), "bytes")
-        print("Base64 data:", b64_data)
-        with open(target_file, "wb") as f:
-            f.write(b64_data)
-        print("Data saved to", target_file)
-elif args.command == "load-b64-decrypt":
-    if args.r_encrypted_mnemonic_file is None:
-        print("Please specify a file")
-    else:
-        with open(args.r_encrypted_mnemonic_file, "rb") as f:
-            b64_data = f.read()
-        # Convert from base64 to bytes
-        encrypted_data = base64.b64decode(b64_data)
-        encrypted_qr = EncryptedQRCode()
-        print(encrypted_qr.public_data(encrypted_data.decode().encode("latin-1")))
-        typed_key = input("Enter decryption key: ")
-        binary_mnemonic = encrypted_qr.decrypt(typed_key)
-        if binary_mnemonic:
-            print(bip39.mnemonic_from_bytes(binary_mnemonic))
-        else:
-            print("Failed to decrypt")
-elif args.command == "load-b64-to-qr":
-    if args.encrypted_to_qr is None:
-        print("Please specify a file")
-    else:
-        with open(args.encrypted_to_qr, "rb") as f:
-            b64_data = f.read()
-        encrypted_data = base64.b64decode(b64_data)
-        encrypted_qr = EncryptedQRCode()
-        encrypted_data = encrypted_data.decode().encode("latin-1")
-        print(encrypted_qr.public_data(encrypted_data))
-        qr_code(encrypted_data)
+    try {
+        const encryptedPayload = encryptData(data, passphrase, iterations, mode, outputFormat);
         
+        document.getElementById("result").style.display = "block";
+        document.getElementById("encryptedData").value = encryptedPayload;
 
-else:
-    parser.print_help()
+        const qrContainer = document.getElementById("qrContainer");
+        qrContainer.innerHTML = "";
+
+        const qrBox = document.createElement("div");
+        qrBox.className = "qr-box";
+        qrBox.innerHTML = `<p style="margin:8px 0 12px; color:black; font-weight:bold;">Scan this Encrypted QR</p>`;
+        qrContainer.appendChild(qrBox);
+
+        new QRCode(qrBox, {
+            text: encryptedPayload,
+            width: 360,
+            height: 360,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.M
+        });
+
+    } catch (e) {
+        alert("Encryption failed: " + e.message);
+    }
+}
+
+function decryptTest() {
+    const payload = document.getElementById("decryptPayload").value.trim();
+    const passphrase = document.getElementById("decryptPass").value;
+
+    if (!payload || !passphrase) {
+        return alert("Please provide both payload and passphrase");
+    }
+
+    try {
+        const decrypted = decryptData(payload, passphrase);
+        document.getElementById("decryptedResult").innerHTML = 
+            `<span class="success">✅ Decryption successful:</span><br><br>${decrypted}`;
+    } catch (e) {
+        document.getElementById("decryptedResult").innerHTML = 
+            `<span style="color:#ef4444;">❌ Decryption failed: ${e.message}</span>`;
+    }
+}
+
+function clearData() {
+    document.getElementById("data").value = "";
+}
+</script>
+
+</body>
+</html>
