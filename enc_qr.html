@@ -1,0 +1,333 @@
+# The MIT License (MIT)
+
+# Copyright (c) 2021-2023 Krux contributors
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Python requirements: pycryptodome, opencv-python, pyzbar, embit, qrcode
+#  pip install pycryptodome opencv-python pyzbar embit qrcode
+# OS may require: zbar-tools (sudo apt install zbar-tools)
+
+# Usage:
+
+# Decrypt a mnemonic from a json file:
+#  python krux_decrypt.py json --file seeds.json
+
+# Scan and decrypt an encrypted mnemonic QR code:
+#  python krux_decrypt.py qr
+
+# Scan and save an encrypted mnemonic to a Base64 text file:
+#  python krux_decrypt.py save --file encrypted_mnemonic.txt
+
+# Load and decrypt an encrypted mnemonic from a Base64 text file:
+#  python krux_decrypt.py load-b64-decrypt --file encrypted_mnemonic.txt
+
+# Load from a Base64 text file and display an encrypted mnemonic QR code:
+#  python krux_decrypt.py load-b64-to-qr --file encrypted_mnemonic.txt
+
+import hashlib
+import base64
+import argparse
+import json
+import cv2
+from Crypto.Cipher import AES
+from pyzbar.pyzbar import decode
+from qrcode import QRCode
+from embit import bip39
+
+
+PBKDF2_HMAC_ECB = 0
+PBKDF2_HMAC_CBC = 1
+AES_BLOCK_SIZE = 16
+
+VERSION_MODE = {
+    "AES-ECB": AES.MODE_ECB,
+    "AES-CBC": AES.MODE_CBC,
+    PBKDF2_HMAC_ECB: AES.MODE_ECB,
+    PBKDF2_HMAC_CBC: AES.MODE_CBC,
+}
+
+VERSION_NUMBER = {
+    "AES-ECB": PBKDF2_HMAC_ECB,
+    "AES-CBC": PBKDF2_HMAC_CBC,
+}
+
+
+class AESCipher(object):
+    """Helper for AES encrypt/decrypt"""
+
+    def __init__(self, key, salt, iterations):
+        self.key = hashlib.pbkdf2_hmac(
+            "sha256", key.encode(), salt.encode(), iterations
+        )
+
+    def decrypt(self, encrypted, mode, iv=None):
+        """Decrypt a base64 using AES MODE_ECB and return the value decoded as string"""
+        if iv:
+            decryptor = AES.new(self.key, mode, iv)
+        else:
+            decryptor = AES.new(self.key, mode)
+        load = decryptor.decrypt(encrypted).decode("utf-8")
+        return load.replace("\x00", "")
+
+    def decrypt_bytes(self, encrypted, mode, i_vector=None):
+        """Decrypt and return value as bytes"""
+        if i_vector:
+            decryptor = AES.new(self.key, mode, i_vector)
+        else:
+            decryptor = AES.new(self.key, mode)
+        return decryptor.decrypt(encrypted)
+
+
+class MnemonicStorage:
+    """Handler of stored encrypted seeds"""
+
+    def __init__(self, json_vault) -> None:
+        self.stored = json_vault
+
+    def list_mnemonics(self, sd_card=False):
+        """List all seeds stored on a file"""
+        mnemonic_ids = []
+        for mnemonic_id in self.stored:
+            mnemonic_ids.append(mnemonic_id)
+        return mnemonic_ids
+
+    def decrypt(self, key, mnemonic_id):
+        """Decrypt a selected encrypted mnemonic from a file"""
+        try:
+            encrypted_data = self.stored.get(mnemonic_id)["data"]
+            iterations = self.stored.get(mnemonic_id)["key_iterations"]
+            version = self.stored.get(mnemonic_id)["version"]
+        except:
+            return None
+        data = base64.b64decode(encrypted_data)
+        mode = VERSION_MODE[version]
+        if mode == AES.MODE_ECB:
+            encrypted_mnemonic = data
+            iv = None
+        else:
+            encrypted_mnemonic = data[AES_BLOCK_SIZE:]
+            iv = data[:AES_BLOCK_SIZE]
+        decryptor = AESCipher(key, mnemonic_id, iterations)
+        words = decryptor.decrypt(encrypted_mnemonic, mode, iv)
+        return words
+
+
+class EncryptedQRCode:
+    """Creates and decrypts encrypted mnemonic QR codes"""
+
+    def __init__(self) -> None:
+        self.mnemonic_id = None
+        self.version = None
+        self.iterations = None
+        self.encrypted_data = None
+
+    def public_data(self, data):
+        """Parse and returns encrypted mnemonic QR codes public data"""
+        mnemonic_info = "Encrypted QR Code:\n"
+        try:
+            id_length = int.from_bytes(data[:1], "big")
+            self.mnemonic_id = data[1 : id_length + 1].decode("utf-8")
+            mnemonic_info += "ID: " + self.mnemonic_id + "\n"
+            self.version = int.from_bytes(data[id_length + 1 : id_length + 2], "big")
+            version_name = [k for k, v in VERSION_NUMBER.items() if v == self.version][
+                0
+            ]
+            mnemonic_info += "Version: " + version_name + "\n"
+            self.iterations = int.from_bytes(data[id_length + 2 : id_length + 5], "big")
+            self.iterations *= 10000
+            mnemonic_info += "Key iter.: " + str(self.iterations)
+        except:
+            return None
+        extra_bytes = id_length + 5  # 1(id length byte) + 1(version) + 3(iterations)
+        if self.version == 1:
+            extra_bytes += 16  # Initial Vector size
+        extra_bytes += 16  # Encrypted QR checksum is always 16 bytes
+        len_mnemonic_bytes = len(data) - extra_bytes
+        if len_mnemonic_bytes not in (16, 32):
+            print(len_mnemonic_bytes)
+            return None
+        self.encrypted_data = data[id_length + 5 :]
+        return mnemonic_info
+
+    def decrypt(self, key):
+        """Decrypts encrypted mnemonic QR codes"""
+        mode = VERSION_MODE[self.version]
+        if mode == AES.MODE_ECB:
+            encrypted_mnemonic_data = self.encrypted_data
+            i_vector = None
+        else:
+            encrypted_mnemonic_data = self.encrypted_data[AES_BLOCK_SIZE:]
+            i_vector = self.encrypted_data[:AES_BLOCK_SIZE]
+        success = False
+        decryptor = AESCipher(key, self.mnemonic_id, self.iterations)
+        decrypted_data = decryptor.decrypt_bytes(
+            encrypted_mnemonic_data, mode, i_vector
+        )
+        mnemonic_data = decrypted_data[:-AES_BLOCK_SIZE]
+        checksum = decrypted_data[-AES_BLOCK_SIZE:]
+        # Data validation:
+        if hashlib.sha256(mnemonic_data).digest()[:16] == checksum:
+            success = True
+
+        return mnemonic_data if success else None
+
+
+def scan():
+    """Opens a scan window and uses cv2 to detect and decode a QR code, returning its data"""
+    vid = cv2.VideoCapture(0)
+    qr_data = None
+    while True:
+        # Capture the video frame by frame
+        _, frame = vid.read()
+        try:
+            qr_data = decode(frame)
+        except:
+            qr_data = []
+        # _, _, _ = detector.detectAndDecode(frame)
+        if qr_data:
+            break
+        # Display the resulting frame
+        cv2.imshow("frame", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+    vid.release()
+    cv2.destroyAllWindows()
+    return qr_data[0].data
+
+def qr_code(qr_data):
+    from io import StringIO
+
+    # Prints ascii QR code
+    qr_code = QRCode()
+    qr_code.add_data(qr_data)
+    qr_string = StringIO()
+    qr_code.print_ascii(out=qr_string, invert=True)
+    print("Encrypted QR Code:")
+    print(qr_string.getvalue())
+
+
+parser = argparse.ArgumentParser(
+    prog="krux_decrypt",
+    description="Python script to decrypt Krux encrypted mnemonics",
+)
+
+subparsers = parser.add_subparsers(help="sub-command help", dest="command")
+qr_parser = subparsers.add_parser("qr", help="scans an decrypt an encrypted QR code")
+
+file_parser = subparsers.add_parser(
+    "json", help="loads and decrypt a mnemonic from a Krux encrypted .json file"
+)
+file_parser.add_argument("--file", dest="json_file", help="path to file to .json file")
+
+file_saver_parser = subparsers.add_parser("save", help="Saves a encrypted mnemonic to a .txt file")
+file_saver_parser.add_argument("--file", dest="encrypted_mnemonic_file", help="path to file to .txt file")
+
+file_loader_parser = subparsers.add_parser("load-b64-decrypt", help="Loads a encrypted mnemonic from a .txt file")
+file_loader_parser.add_argument("--file", dest="r_encrypted_mnemonic_file", help="path to file to .txt file")
+
+file_loader_qr_parser = subparsers.add_parser("load-b64-to-qr", help="Loads a encrypted mnemonic from a .txt file")
+file_loader_qr_parser.add_argument("--file", dest="encrypted_to_qr", help="path to file to .txt file")
+
+args = parser.parse_args()
+if args.command == "qr":
+    _ = input("Press enter to scan an encrypted mnemonic")
+    scanned_data = scan()
+    encrypted_qr = EncryptedQRCode()
+    print(encrypted_qr.public_data(scanned_data.decode().encode("latin-1")))
+    typed_key = input("Enter decryption key: ")
+
+    binary_mnemonic = encrypted_qr.decrypt(typed_key)
+    if binary_mnemonic:
+        print(bip39.mnemonic_from_bytes(binary_mnemonic))
+    else:
+        print("Failed to decrypt")
+elif args.command == "json":
+    if args.json_file is None:
+        print("Please specify a file")
+    else:
+        json_file = open(args.json_file, "r")
+        json_vault = json.loads(json_file.read())
+        json_file.close()
+        vault = MnemonicStorage(json_vault)
+        print("Stored Mnemonics:")
+        stored_mnemonics = vault.list_mnemonics()
+        for i, mnemonic in enumerate(stored_mnemonics):
+            print(str(i) + ":", mnemonic)
+        valid_index = False
+        while not valid_index:
+            try:
+                mnemonic_index = int(
+                    input("Enter the index of the mnemonic you wish to decrypt: ")
+                )
+                valid_index = True
+            except:
+                print("Please enter a integer number")
+        typed_key = input("Enter decryption key: ")
+        binary_mnemonic = vault.decrypt(typed_key, stored_mnemonics[mnemonic_index])
+        print(binary_mnemonic)
+elif args.command == "save":
+    if args.encrypted_mnemonic_file is None:
+        print("Please specify a target file")
+    else:
+        _ = input("Press enter to scan an encrypted mnemonic")
+        scanned_data = scan()
+        # Save scanned data to file as base64 file
+        target_file = args.encrypted_mnemonic_file
+        if not target_file:
+            target_file = "encrypted_mnemonic.txt"
+        if not target_file.endswith(".txt"):
+            target_file += ".txt"
+        b64_data = base64.b64encode(scanned_data)
+        print("Data length:", len(b64_data), "bytes")
+        print("Base64 data:", b64_data)
+        with open(target_file, "wb") as f:
+            f.write(b64_data)
+        print("Data saved to", target_file)
+elif args.command == "load-b64-decrypt":
+    if args.r_encrypted_mnemonic_file is None:
+        print("Please specify a file")
+    else:
+        with open(args.r_encrypted_mnemonic_file, "rb") as f:
+            b64_data = f.read()
+        # Convert from base64 to bytes
+        encrypted_data = base64.b64decode(b64_data)
+        encrypted_qr = EncryptedQRCode()
+        print(encrypted_qr.public_data(encrypted_data.decode().encode("latin-1")))
+        typed_key = input("Enter decryption key: ")
+        binary_mnemonic = encrypted_qr.decrypt(typed_key)
+        if binary_mnemonic:
+            print(bip39.mnemonic_from_bytes(binary_mnemonic))
+        else:
+            print("Failed to decrypt")
+elif args.command == "load-b64-to-qr":
+    if args.encrypted_to_qr is None:
+        print("Please specify a file")
+    else:
+        with open(args.encrypted_to_qr, "rb") as f:
+            b64_data = f.read()
+        encrypted_data = base64.b64decode(b64_data)
+        encrypted_qr = EncryptedQRCode()
+        encrypted_data = encrypted_data.decode().encode("latin-1")
+        print(encrypted_qr.public_data(encrypted_data))
+        qr_code(encrypted_data)
+        
+
+else:
+    parser.print_help()
