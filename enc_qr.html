@@ -1,11 +1,4 @@
-Here's the **clean fix** — completely removing the Tailwind CDN warning.
-
-The warning appears because you're using the Tailwind Play CDN (`cdn.tailwindcss.com`).  
-For a single standalone HTML file that works offline and doesn't trigger warnings, the best solution is to **inline a minimal Tailwind stylesheet** using a pre-built standalone version.
-
-### ✅ Fixed Version (No Tailwind CDN Warning)
-
-```html
+html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -390,13 +383,3 @@ For a single standalone HTML file that works offline and doesn't trigger warning
     </script>
 </body>
 </html>
-```
-
-### How to use:
-1. Copy all the code above.
-2. Save as `krux-decrypt.html`
-3. Open the file in any browser (Chrome/Firefox/Edge).
-
-This version uses a **standalone Tailwind build** from jsDelivr that does **not** trigger the "should not be used in production" warning.
-
-Let me know if you want a version with **zero external scripts** (fully self-contained with all Tailwind classes inlined as plain CSS).
