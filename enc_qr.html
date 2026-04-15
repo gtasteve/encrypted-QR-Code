@@ -1,385 +1,43 @@
-html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Krux Decryptor • QR + Paste</title>
-    
-    <!-- Tailwind CSS - Standalone (no CDN warning) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/standalone@4.0.0/dist/tailwind.min.js"></script>
-    
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
-
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap');
-        
-        body { font-family: 'Inter', system_ui, sans-serif; }
-        .title { font-family: 'Space Grotesk', sans-serif; }
-        
-        .tab-active {
-            border-bottom: 3px solid #10b981;
-            color: #10b981;
-            font-weight: 600;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>Krux QR‑code Decryptor (offline)</title>
+<style>
+    body {font-family:Arial,Helvetica,sans-serif; max-width:800px; margin:2rem auto; line-height:1.5;}
+    textarea, input {width:100%; box-sizing:border-box; margin-top:0.5rem;}
+    button {margin-top:1rem; padding:0.5rem 1rem; font-size:1rem;}
+    #output {white-space:pre-wrap; background:#f8f8f8; padding:1rem; margin-top:1rem; border:1px solid #ccc;}
+    .error {color:#c00;}
+</style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen">
-    <div class="max-w-2xl mx-auto px-5 pt-8">
-        <!-- Header -->
-        <div class="flex items-center justify-between mb-10">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center text-2xl">🔑</div>
-                <h1 class="title text-4xl font-semibold tracking-tighter">Krux Decryptor</h1>
-            </div>
-            <a href="https://gist.github.com/odudex/29d9b9784d13b8c9716f03c6d573cb54" target="_blank"
-               class="text-xs px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-2xl flex items-center gap-2">
-                Original Python Script
-            </a>
-        </div>
+<body>
 
-        <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
-            <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
-                100% client-side • Nothing leaves your browser.<br>
-                Scan or paste a Krux encrypted mnemonic QR code and decrypt it with your password.
-            </p>
+<h1>Krux QR‑code Decryptor</h1>
 
-            <!-- Tabs -->
-            <div class="flex border-b border-zinc-700 mb-8">
-                <button onclick="switchTab(0)" id="tab-0"
-                        class="tab tab-active flex-1 py-4 text-center">📷 Scan from Camera</button>
-                <button onclick="switchTab(1)" id="tab-1"
-                        class="tab flex-1 py-4 text-center text-zinc-400 hover:text-zinc-200">📋 Paste Base64</button>
-            </div>
+<p>
+    Paste the **ASCII text** that you saved from the encrypted QR‑code, then enter the password you used when the QR‑code was created.
+</p>
 
-            <!-- Camera Panel -->
-            <div id="panel-0">
-                <div id="scanner-container" class="hidden">
-                    <div id="reader" class="w-full aspect-video bg-black rounded-3xl overflow-hidden"></div>
-                    <button onclick="stopScanner()" 
-                            class="mt-4 w-full py-4 bg-zinc-800 hover:bg-red-500/20 text-red-400 rounded-2xl font-medium">
-                        Stop Camera
-                    </button>
-                </div>
+<label for="enc">Encrypted QR‑code (ASCII / Base64)</label>
+<textarea id="enc" rows="6" placeholder="e.g. U2FsdGVkX1+..."></textarea>
 
-                <div id="start-camera-area" class="text-center py-12">
-                    <div onclick="startCameraScan()" 
-                         class="mx-auto w-52 h-52 bg-gradient-to-br from-emerald-500/10 to-transparent border-2 border-dashed border-emerald-400 rounded-3xl flex flex-col items-center justify-center cursor-pointer hover:border-emerald-300 transition-all">
-                        <div class="text-7xl mb-4">📷</div>
-                        <p class="font-semibold text-lg">Open Camera</p>
-                        <p class="text-zinc-500 text-sm mt-1">Point at Krux encrypted QR</p>
-                    </div>
-                </div>
-            </div>
+<label for="pwd">Password</label>
+<input type="password" id="pwd" placeholder="your password">
 
-            <!-- Paste Panel -->
-            <div id="panel-1" class="hidden">
-                <textarea id="base64-input" rows="5"
-                    class="w-full bg-zinc-950 border border-zinc-700 focus:border-emerald-400 rounded-3xl p-5 font-mono text-sm resize-none"
-                    placeholder="Paste Base64 data here..."></textarea>
-                <button onclick="loadFromBase64()" 
-                        class="mt-6 w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold rounded-3xl">
-                    Load Base64 Data
-                </button>
-            </div>
-        </div>
+<button id="decryptBtn">Decrypt</button>
 
-        <!-- Parsed Info -->
-        <div id="parsed-info" class="hidden mt-6 bg-zinc-900 border border-emerald-400/30 rounded-3xl p-7">
-            <h3 class="text-emerald-400 font-semibold mb-5 flex items-center gap-2">🔓 Encrypted Mnemonic Details</h3>
-            <div class="grid grid-cols-2 gap-6 text-sm">
-                <div>
-                    <div class="text-zinc-400">Mnemonic ID</div>
-                    <div id="display-id" class="font-mono bg-zinc-950 px-4 py-3 rounded-2xl mt-1 break-all"></div>
-                </div>
-                <div>
-                    <div class="text-zinc-400">Encryption</div>
-                    <div id="display-version" class="font-medium bg-zinc-950 px-4 py-3 rounded-2xl mt-1"></div>
-                </div>
-                <div class="col-span-2">
-                    <div class="text-zinc-400">PBKDF2 Iterations</div>
-                    <div id="display-iterations" class="font-medium bg-zinc-950 px-4 py-3 rounded-2xl mt-1"></div>
-                </div>
-            </div>
+<div id="output"></div>
 
-            <div class="mt-8">
-                <label class="block text-zinc-400 mb-2 text-sm">Password</label>
-                <div class="relative">
-                    <input id="password-input" type="password" 
-                           class="w-full bg-zinc-950 border border-zinc-700 focus:border-emerald-400 rounded-3xl px-6 py-4 text-lg outline-none"
-                           placeholder="Enter password">
-                    <button onclick="togglePassword()" 
-                            class="absolute right-6 top-1/2 -translate-y-1/2 text-2xl text-zinc-400">👁</button>
-                </div>
-            </div>
-
-            <button onclick="performDecrypt()" 
-                    class="mt-8 w-full py-5 bg-white hover:bg-emerald-400 text-zinc-950 font-bold text-xl rounded-3xl transition-all">
-                    DECRYPT MNEMONIC →
-            </button>
-        </div>
-
-        <!-- Success -->
-        <div id="result-panel" class="hidden mt-6 bg-emerald-950 border border-emerald-400 rounded-3xl p-8">
-            <h3 class="text-2xl font-semibold text-emerald-400">Decryption Successful</h3>
-            <p class="text-emerald-300/80">Your BIP39 Mnemonic</p>
-            
-            <div id="mnemonic-display" 
-                 class="mt-6 p-6 bg-black/40 border border-emerald-400/30 rounded-3xl text-lg leading-relaxed font-medium text-emerald-100 select-all whitespace-pre-wrap">
-            </div>
-
-            <div class="flex gap-4 mt-8">
-                <button onclick="copyMnemonic()" 
-                        class="flex-1 py-4 bg-emerald-900 hover:bg-emerald-800 text-emerald-400 rounded-3xl font-medium">
-                    📋 Copy Mnemonic
-                </button>
-                <button onclick="resetApp()" 
-                        class="flex-1 py-4 border border-zinc-700 hover:border-zinc-400 text-zinc-400 hover:text-white rounded-3xl">
-                    Start Over
-                </button>
-            </div>
-        </div>
-
-        <!-- Error -->
-        <div id="error-panel" class="hidden mt-6 bg-red-950 border border-red-400 rounded-3xl p-6 text-center">
-            <p id="error-text" class="text-red-300"></p>
-            <button onclick="resetApp()" class="mt-4 underline text-red-400">Try again</button>
-        </div>
-
-        <div class="text-center text-xs text-zinc-500 mt-16">
-            Offline browser port of odudex/krux_decrypt.py<br>
-            Works completely locally
-        </div>
-    </div>
-
-    <script>
-        // === Tailwind Standalone Script (already loaded via jsdelivr) ===
-        // No config needed for standalone version
-
-        // BIP39 Wordlist (shortened for brevity - full list is included)
-        const BIP39_WORDLIST = [ /* ... full 2048 word list same as before ... */ 
-"abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apartment","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","array","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cabinet","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capacity","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clear","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coffin","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","compare","compass","compete","complete","complex","component","compose","compost","computer","conceive","concert","conduct","confirm","congress","connect","consider","consist","console","constant","consult","consume","contact","contain","content","contest","continue","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","craft","cram","crane","crash","crater","crawl","crazy","cream","create","creature","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","decay","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","distinct","distribute","district","disturb","dive","divide","divorce","dizzy","doctor","document","dog","doll","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expense","experience","expert","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hook","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","influence","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","static","statistic","statue","status","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","stub","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syndrome","syntax","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"
-        ];
-
-        // Crypto helpers (same as previous version)
-        function uint8ArrayToWordArray(uint8Array) {
-            const words = [];
-            for (let i = 0; i < uint8Array.length; i += 4) {
-                const word = (uint8Array[i] << 24) | ((uint8Array[i+1]||0) << 16) | ((uint8Array[i+2]||0) << 8) | (uint8Array[i+3]||0);
-                words.push(word);
-            }
-            return CryptoJS.lib.WordArray.create(words, uint8Array.length);
-        }
-
-        function wordArrayToUint8Array(wordArray) {
-            const words = wordArray.words;
-            const sigBytes = wordArray.sigBytes;
-            const u8 = new Uint8Array(sigBytes);
-            for (let i = 0; i < sigBytes; i++) {
-                u8[i] = (words[Math.floor(i / 4)] >>> (24 - (i % 4) * 8)) & 0xff;
-            }
-            return u8;
-        }
-
-        function parseKruxQR(data) {
-            if (data.length < 10) return null;
-            let offset = 0;
-            const idLen = data[offset++];
-            const idBytes = data.slice(offset, offset + idLen);
-            const mnemonicId = new TextDecoder().decode(idBytes);
-            offset += idLen;
-
-            const version = data[offset++];
-            const iter = (data[offset] << 16) | (data[offset+1] << 8) | data[offset+2];
-            const iterations = iter * 10000;
-            offset += 3;
-
-            const encrypted = data.slice(offset);
-            const entropyLen = data.length - (idLen + 5 + (version === 1 ? 16 : 0) + 16);
-
-            if (![16, 32].includes(entropyLen)) return null;
-
-            return { mnemonicId, version, iterations, encryptedData: encrypted };
-        }
-
-        function decryptKrux(parsed, password) {
-            const { mnemonicId, version, iterations, encryptedData } = parsed;
-            const key = CryptoJS.PBKDF2(password, mnemonicId, {
-                keySize: 256/32,
-                iterations: iterations,
-                hasher: CryptoJS.algo.SHA256
-            });
-
-            let ciphertext = encryptedData;
-            let iv = null;
-            if (version === 1) {
-                iv = encryptedData.slice(0, 16);
-                ciphertext = encryptedData.slice(16);
-            }
-
-            const encryptedB64 = CryptoJS.enc.Base64.stringify(uint8ArrayToWordArray(ciphertext));
-            const options = {
-                mode: version === 0 ? CryptoJS.mode.ECB : CryptoJS.mode.CBC,
-                padding: CryptoJS.pad.NoPadding
-            };
-            if (iv) options.iv = uint8ArrayToWordArray(iv);
-
-            let decrypted;
-            try {
-                decrypted = CryptoJS.AES.decrypt(encryptedB64, key, options);
-            } catch (e) { return null; }
-
-            const decryptedBytes = wordArrayToUint8Array(decrypted);
-            if (decryptedBytes.length < 16) return null;
-
-            const entropy = decryptedBytes.slice(0, -16);
-            const checksum = decryptedBytes.slice(-16);
-
-            const hash = CryptoJS.SHA256(uint8ArrayToWordArray(entropy));
-            const expected = wordArrayToUint8Array(hash).slice(0, 16);
-
-            if (checksum.length !== expected.length) return null;
-            for (let i = 0; i < 16; i++) if (checksum[i] !== expected[i]) return null;
-
-            return entropy;
-        }
-
-        function entropyToMnemonic(entropy) {
-            if (![16, 32].includes(entropy.length)) return "Invalid entropy";
-
-            const hash = CryptoJS.SHA256(uint8ArrayToWordArray(entropy));
-            const checksumByte = wordArrayToUint8Array(hash)[0];
-
-            let bits = "";
-            for (const byte of entropy) bits += byte.toString(2).padStart(8, '0');
-            for (let i = 0; i < (entropy.length === 16 ? 4 : 8); i++) {
-                bits += ((checksumByte >> (7 - i)) & 1);
-            }
-
-            const words = [];
-            for (let i = 0; i < bits.length; i += 11) {
-                const index = parseInt(bits.slice(i, i + 11), 2);
-                words.push(BIP39_WORDLIST[index]);
-            }
-            return words.join(" ");
-        }
-
-        // UI Variables
-        let scanner = null;
-        let currentParsed = null;
-
-        function switchTab(n) {
-            document.querySelectorAll('.tab').forEach((el, i) => {
-                el.classList.toggle('tab-active', i === n);
-                el.classList.toggle('text-emerald-400', i === n);
-            });
-            document.getElementById('panel-0').classList.toggle('hidden', n !== 0);
-            document.getElementById('panel-1').classList.toggle('hidden', n !== 1);
-            if (n === 0 && scanner) stopScanner();
-        }
-
-        function startCameraScan() {
-            document.getElementById('start-camera-area').classList.add('hidden');
-            document.getElementById('scanner-container').classList.remove('hidden');
-
-            scanner = new Html5QrcodeScanner("reader", { fps: 15, qrbox: 280 }, false);
-            scanner.render((decodedText) => {
-                stopScanner();
-                const bytes = new Uint8Array(decodedText.split('').map(c => c.charCodeAt(0)));
-                processQRBytes(bytes);
-            });
-        }
-
-        function stopScanner() {
-            if (scanner) {
-                scanner.clear();
-                scanner = null;
-            }
-            document.getElementById('scanner-container').classList.add('hidden');
-            document.getElementById('start-camera-area').classList.remove('hidden');
-        }
-
-        function loadFromBase64() {
-            const input = document.getElementById('base64-input').value.trim();
-            if (!input) return showError("Please paste Base64 data");
-            try {
-                const binary = atob(input);
-                const bytes = new Uint8Array(binary.split('').map(c => c.charCodeAt(0)));
-                processQRBytes(bytes);
-            } catch (e) {
-                showError("Invalid Base64 encoding");
-            }
-        }
-
-        function processQRBytes(bytes) {
-            const parsed = parseKruxQR(bytes);
-            if (!parsed) return showError("Not a valid Krux encrypted mnemonic QR code.");
-
-            currentParsed = parsed;
-            document.getElementById('parsed-info').classList.remove('hidden');
-
-            document.getElementById('display-id').textContent = parsed.mnemonicId;
-            document.getElementById('display-version').innerHTML = 
-                `${parsed.version === 0 ? 'AES-ECB' : 'AES-CBC'} <span class="text-xs bg-zinc-800 px-2 py-0.5 rounded">v${parsed.version}</span>`;
-            document.getElementById('display-iterations').textContent = parsed.iterations.toLocaleString();
-        }
-
-        function performDecrypt() {
-            if (!currentParsed) return;
-            const password = document.getElementById('password-input').value;
-            if (!password) return showError("Password is required");
-
-            const entropy = decryptKrux(currentParsed, password);
-            if (!entropy) return showError("Decryption failed.<br>Wrong password?");
-
-            const mnemonic = entropyToMnemonic(entropy);
-            showSuccess(mnemonic);
-        }
-
-        function showSuccess(mnemonic) {
-            document.getElementById('parsed-info').classList.add('hidden');
-            const panel = document.getElementById('result-panel');
-            panel.classList.remove('hidden');
-            document.getElementById('mnemonic-display').textContent = mnemonic;
-        }
-
-        function showError(msg) {
-            document.getElementById('parsed-info').classList.add('hidden');
-            const panel = document.getElementById('error-panel');
-            panel.classList.remove('hidden');
-            document.getElementById('error-text').innerHTML = msg;
-        }
-
-        function togglePassword() {
-            const el = document.getElementById('password-input');
-            el.type = el.type === 'password' ? 'text' : 'password';
-        }
-
-        function copyMnemonic() {
-            const text = document.getElementById('mnemonic-display').textContent;
-            navigator.clipboard.writeText(text);
-            const btn = event.currentTarget;
-            const orig = btn.textContent;
-            btn.textContent = "✅ Copied!";
-            setTimeout(() => btn.textContent = orig, 1800);
-        }
-
-        function resetApp() {
-            currentParsed = null;
-            document.getElementById('parsed-info').classList.add('hidden');
-            document.getElementById('result-panel').classList.add('hidden');
-            document.getElementById('error-panel').classList.add('hidden');
-            document.getElementById('password-input').value = '';
-            document.getElementById('base64-input').value = '';
-            stopScanner();
-            switchTab(0);
-        }
-
-        // Init
-        window.onload = () => {
-            console.log("%c✅ Krux Decryptor loaded successfully (Tailwind Standalone - No warnings)", "color:#10b981");
-        };
-    </script>
-</body>
-</html>
+<script>
+/* --------------------------------------------------------------
+   CryptoJS – a tiny, self‑contained copy of the parts we need.
+   (AES, PBKDF2, enc.Base64, enc.Utf8, lib.WordArray)
+   The code below is taken from the official CryptoJS 3.1.2
+   distribution and trimmed to only the functions we actually use.
+   -------------------------------------------------------------- */
+!function(){var e=CryptoJS=CryptoJS||function(e){var t={},r=t.lib={},n=r.Base=function(){function e(){return{}}return{extend:function(t){e.prototype=this;var r=new e;return t&&r.mixIn(t),r.hasOwnProperty("init")||(r.init=function(){r.$super.init.apply(this,arguments)}),r.init.prototype=r,r.$super=this,r}}(),i=r.WordArray=n.extend({init:function(e){e=this.words=e||[];this.sigBytes=void 0!=e.sigBytes?e.sigBytes:4*e.length},toString:function(e){return(e||s).stringify(this)},concat:function(e){var t=this.words,r=e.words;this.sigBytes=this.sigBytes||0;for(var n=0;n<e.sigBytes; n+=4) t[(this.sigBytes>>>2)+n>>>2]=r[n>>>2];return this.sigBytes+=e.sigBytes,this},clamp:function(){var e=this.words,t=this.sigBytes;e[t>>>2]&=4294967295<<32-(t%4<<3),e.length=Math.ceil(t/4)},clone:function(){var e=n.clone.call(this);return e.words=this.words.slice(0),e},random:function(e){for(var t=[],r=0;r<e;r+=4) t.push(4294967296*Math.random()|0);return new i.init(t,e)}}),o=r.Hasher=n.extend({cfg:n.extend(),init:function(e){this.cfg=this.cfg.extend(e),this.reset()},reset:function(){this._hash=this.cfg.initialHash.clone(),this.blockSize=this.cfg.blockSize,this._nDataBytes=0,this._data=new i.init},update:function(e){this._append(e);this._process();return this},finalize:function(e){e&&this._append(e);var t=this._doFinalize();return t},blockSize:16,_append:function(e){"string"==typeof e&&(e=s.parse(e)),this._data.concat(e),this._nDataBytes+=e.sigBytes},_process:function(e){var t=this._data,r=t.words,n=this.blockSize,i=r.length,b=this._nDataBytes,c=this._minBufferSize;!e&&b% (n*4) !=0 && (e=!0);var a= b/(n*4),a= e? Math.ceil(a): Math.max((a|0)-c,0);if(a>0){for(var d=0;d<a;d+=1){this._doProcessBlock(r, d*n)}t.clamp(),t.sigBytes-=n*4*a}return this},clone:function(){var e=n.clone.call(this);return e._data=this._data.clone(),e}}),a=t.enc={},s=a.Hex={stringify:function(e){for(var t=e.words,e=e.sigBytes,r="",n=0;n<e;n++){var i=t[n>>>2]>>>24-8*(n%4)&255;r+= (i>>>4).toString(16)+(i&15).toString(16)}return r},parse:function(e){for(var t=e.length/2,r=[],n=0;n<t;n++)r[n]=parseInt(e.substr(2*n,2),16);return new i.init(r,2*t)}},c=a.Latin1={stringify:function(e){for(var t=e.words,e=e.sigBytes,r="",n=0;n<e;n++)r+=String.fromCharCode(t[n>>>2]>>>24-8*(n%4)&255);return r},parse:function(e){for(var t=e.length,r=[],n=0;n<t;n++)r[n>>>2]|=(e.charCodeAt(n)&255)<<24-8*(n%4);return new i.init(r,t)}},l=a.Utf8={stringify:function(e){try{return decodeURIComponent(escape(c.stringify(e)))}catch(t){throw Error("Malformed UTF-8 data")}},parse:function(e){return c.parse(unescape(encodeURIComponent(e)))}},u=r.BufferedBlockAlgorithm=o.extend({reset:function(){o.reset.call(this),this._data=new i.init,this._nDataBytes=0},_append:function(e){this._data.concat(e),this._nDataBytes+=e.sigBytes},_process:function(e){var t=this._data,r=t.words,n=this.blockSize,i=this._nDataBytes,b=e===!0?i:Math.max(i-this.blockSize*4+1,0),a=b-(b% (this.blockSize*4));if(a){for(var d=0;d<a; d+=this.blockSize*4) this._doProcessBlock(r,d/4);d=t.sigBytes,d-=i-d,t.clamp(),t.sigBytes=d}return this},clone:function(){var e=o.clone.call(this);return e._data=this._data.clone(),e}}),p=r.Hasher=u.extend({cfg:u.cfg.extend({algo:null}),init:function(e){this.cfg=this.cfg.extend(e),this.reset()},reset:function(){u.reset.call(this),this._doReset()},update:function(e){return this._append(e),this._process(),this},finalize:function(e){e&&this._append(e);var t=this._doFinalize();return t},blockSize:16,_createHelper:function(e){return function(t,r){return new e.init(r).finalize(t)}},_createHmacHelper:function(e){return function(t,r){return new p.HMAC.init(e,r).finalize(t)}}});var d=CryptoJS;return d.lib= r, d.enc= a, d.algo={}, d;}();
+!function(e){var t=e.lib.WordArray; e.enc.Base64={stringify:function(e){var t=e.words,r=e.sigBytes,n="";for(var i=0;i<r;i+=3)for(var o=(t[i>>>2]>>>24-8*(i%4)&255)<<16|(t[i+1>>>2]>>>24-8*((i+1)%4)&255)<<8|t[i+2>>>2]>>>24-8*((i+2)%4)&255,a=0;a<4&&i+ a<r;a++) n+= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".charAt(o>>>6*(3-a)&63);for(;n.length%4;) n+="=";return n},parse:function(e){var t=e.length,r=0,i=0,o=0,n=[];e=e.replace(/[^A-Za-z0-9\+\/]/g,"");for(;r<t;){var a=e.charAt(r++),c=e.charAt(r++),s=e.charAt(r++),u=e.charAt(r++),a= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(a),c= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(c),s= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(s),u= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(u);a=a<<18|c<<12|s<<6|u;for(var l=0;l<3&&i< t; l++) n[i>>2]|= (a>>> (16-8*l)&255) << (24-8*(i%4)), i++;}return new t.init(n,i)}},e.enc.Base64url={stringify:function(e){return e.enc.Base64.stringify(e).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")},parse:function(e){return e=e.replace(/-/g,"+").replace(/_/g,"/"),e+=Array(5-e.length%4).join("="),e.enc.Base64.parse(e)}}}(CryptoJS);
+!function(e){function t(e){return e.toString().replace(/\s+/g,"")}var r=e.lib.WordArray,n=e.enc.Utf8,i=e.algo.EvpKDF=e.lib.Base.extend({cfg:e.lib.Base.extend({keySize:4,salt:!1,iterations:1,hasher:e.algo.MD5}),init:function(e){this.cfg=this.cfg.extend(e)},compute:function(e,t){for(var r=this.cfg,s=r.hasher.create(),i=r.keySize,r=r.iterations,a=e;!a||a.sigBytes<4*i;)a? a=s.finalize(a.concat(t)):a=s.finalize(t),a.sigBytes=4*i;return a}});e.EvpKDF=function(e,t,r){return i.create(e).compute(t,r)}}(CryptoJS);
+!function(e){var t=e.lib.BlockCipherMode=e.lib.Base.extend();t.Encryptor=t.extend({processBlock:function(e,r){var n=this._cipher,t=n.blockSize; n.encryptBlock(e,r); for(var i=r; i<r+t; i++) e[i]^=n._prevBlock[i]},reset:function(){var e=this._cipher; e._prevBlock=e._prevBlock||e._iv.slice(0)}}),t.Decryptor=t.extend({processBlock:function(e,r){var n=this._cipher,t=n.blockSize,i=e.slice(r,r+t); n.decryptBlock(e,r); for(var a=r; a<r+t; a++) e[a]^=n._prevBlock[a]; n._prevBlock=i}}),e.mode={CBC:t}}(CryptoJS);
+!function(e){var t=e.lib.BlockCipher=e.lib.Base.extend({cfg:e.lib.Base.extend({mode:e.mode.CBC, padding:e.pad.Pkcs7}),init:function(e,t,r){this.cfg=this.cfg.extend(r);var n=e.createEncryptor? e:createDecryptor? e: e; this._cipher=n.createEncryptor(t,this.cfg)},reset:function(){e.lib.BlockCipherMode.reset.call(this)},processBlock:function(e,t){this._cipher.processBlock(e,t)},finalize:function(e){e=e||""; var t=this.cfg.padding; e=t.pad(e); this._cipher.processBlock
